@@ -45,5 +45,6 @@ print model_out.shape
 print end-start
 plt.plot(xo, model_out.reshape((-1,1)), 'b--')
 plt.show()
+model.cost_plot()
 print model_out
 
