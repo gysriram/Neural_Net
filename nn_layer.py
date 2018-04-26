@@ -3,7 +3,6 @@ import math
 from scipy import signal as sg
 from matplotlib import pyplot as plt
 
-eta=0.01
 batch_size=1
 beta=0.9
 beta2=0.999
@@ -20,7 +19,7 @@ epsilon=1e-8
 #Pooling layer
 #Cost plot not correct
 
-def gradient_descent(parameters, delta, vel, s, opt):
+def gradient_descent(parameters, delta, vel, s, opt, eta):
     weight_delta, bias_delta = delta
     layer_weights, layer_bias = parameters
     vel_weights, vel_bias = vel
@@ -53,14 +52,11 @@ def sigmoid(x):
 
 def activation_func(arr, basis_func):
 	if basis_func == "tanh":
-		a = np.tanh(arr)
-		return a
+		return np.tanh(arr)
 	elif basis_func == "sigmoid":
-		a = sigmoid(arr)
-		return a
+		return sigmoid(arr)
 	elif basis_func == "relu":
-		a = np.maximum(arr,0)
-		return a
+		return np.maximum(arr,0)
 	else:
 		return arr
 
@@ -75,6 +71,9 @@ def act_derivative(arr, basis_func):
 	elif basis_func == "relu":
 		a = (arr > 0)
 		return a
+
+def softmax(arr):
+    return np.exp(arr)/np.sum(np.exp(arr), axis=0)
 
 def cross_entropy_cost(output, labels):
 	cost = -(np.dot(np.log(output), labels.T) + np.dot(np.log(1 - output),(1 - labels).T))/batch_size
@@ -104,6 +103,61 @@ class pooling_layer:
 		self.input_size = input_size
 		self.image = image
 
+''' RNN and LSTM unit. TODO: BACKPROP'''
+
+class rnn_unit:
+    def __init__(self, num_input, num_act, num_y):
+        self.weights_ax = np.random.randn(num_act, num_input) * 0.01
+        self.weights_aa = np.random.randn(num_act, num_input) * 0.01
+        self.weights_ya = np.random.randn(num_y, num_act) * 0.01
+        self.bias_a = np.zeros(num_act,1)
+        self.bias_y = np.zeros(num_y, 1)
+        self.activations = np.zeros(num_act, 1)
+        self.output = np.zeros(num_y, 1)
+    def forward_prop(self, act_prev, x):
+        self.activations = activation_func(np.dot(self.weights_ax, x) + np.dot(self.weights_aa, act_prev) + self.bias_a, "tanh")
+        self.output = softmax(np.dot(self.weights_ya, self.activations) + self.bias_y)
+        return self.activations
+    def update_weights(self, x, del_act_next, a_prev):
+        del_tanh = (1 - self.activations * self.activations) * del_act_next
+        del_x = np.dot(self.weights_ax.T, del_tanh)
+        del_weigth_ax = np.dot(del_tanh, x.T)
+        del_a_prev = np.dot(self.weights_aa.T, del_tanh)
+        del_weigth_aa = np.dot(del_tanh, a_prev.T)
+        del_bias_a = np.sum(del_tanh, axis=1, keepdims=True)
+
+class lstm_unit:
+    def __init__(self, num_input, num_act, num_y):
+        self.weights_forget = np.random.randn(num_act, num_act + num_input) * 0.01
+        self.weights_update = np.random.randn(num_act, num_act + num_input) * 0.01
+        self.weights_output = np.random.randn(num_act, num_act + num_input) * 0.01
+        self.weights_cell = np.random.randn(num_act, num_act + num_input) * 0.01
+        self.weights_y = np.random.randn(num_y, num_act + num_input) * 0.01
+        self.bias_forget = np.zeros(num_act,1)
+        self.bias_update = np.zeros(num_act, 1)
+        self.bias_output = np.zeros(num_act, 1)
+        self.bias_cell = np.zeros(num_act, 1)
+        self.bias_y = np.zeros(num_y, 1)
+        self.activations = np.zeros(num_act, 1)
+        self.cell_state = np.zeros(num_act, 1)
+        self.output = np.zeros(num_y, 1)
+    def forward_prop(self, c_prev, act_prev, x):
+        n_x, m =  x.shape
+        n_a = a.shape[0]
+        concat = np.zeros((n_x + n_a, m))
+        concat[: n_a, :] = act_prev
+        concat[n_a :, :] = x
+
+        f_gate = sigmoid(np.dot(self.weights_forget, concat) + self.bias_forget)
+        u_gate = sigmoid(np.dot(self.weights_update, concat) + self.bias_update)
+        c_gate = np.tanh(np.dot(self.weights_cell, concat) + self.bias_cell)
+        self.cell_state = f_gate * c_prev + u_gate * c_gate
+        o_gate = sigmoid(np.dot(self.weights_output) + self.bias_output)
+        self.activations = o_gate * np.tanh(self.cell_state)
+        self.output = softmax(np.dot(self.weights_y, self.activations) + self.bias_y)
+        return self.activations, self.cell_state
+
+
 class fully_connected_layer:
 	def __init__(self, num_input_units, num_units, basis_func):
 		self.num_inputs_units = num_input_units
@@ -128,7 +182,7 @@ class fully_connected_layer:
 		self.activations = activation_func(self.before_activation, self.basis_func)
 		return self.activations
         ''' TODO batch size option '''
-	def update_weights(self, input, err, labels):
+	def update_weights(self, input, err, labels, eta):
                 batch_size = input.shape[1]
                 g_delta = (self.weight_delta, self.bias_delta)
                 parameters = (self.layer_weights, self.layer_bias)
@@ -139,14 +193,14 @@ class fully_connected_layer:
 			self.der_wrt_layer_input = np.dot((self.layer_weights).T, delta)
 			self.weight_delta = np.dot(delta, input.T)/batch_size
 			self.bias_delta = np.sum(delta, axis = 1, keepdims = True)/batch_size
-                        self.layer_weights ,self.layer_bias, self.vel_weights, self.vel_bias, self.s_weights, self.s_bias = gradient_descent(parameters, g_delta, vel, s, 'adam')
+                        self.layer_weights ,self.layer_bias, self.vel_weights, self.vel_bias, self.s_weights, self.s_bias = gradient_descent(parameters, g_delta, vel, s, 'adam', eta)
 		else:
 		#Verify below
 			delta = err * act_derivative(self.before_activation, self.basis_func)
 			self.der_wrt_layer_input = np.dot((self.layer_weights).T, delta)
 			self.weight_delta = np.dot(delta, input.T)/batch_size
 			self.bias_delta = np.sum(delta, axis = 1, keepdims=True)/batch_size
-                        self.layer_weights ,self.layer_bias, self.vel_weights, self.vel_bias, self.s_weights, self.s_bias = gradient_descent(parameters, g_delta, vel, s, 'adam')
+                        self.layer_weights ,self.layer_bias, self.vel_weights, self.vel_bias, self.s_weights, self.s_bias = gradient_descent(parameters, g_delta, vel, s, 'adam', eta)
 		return self.der_wrt_layer_input
 	def get_weights(self):
 		return self.layer_weights
@@ -176,7 +230,7 @@ class nn_model:
                 ''' Back Propagation '''
                 temp_err = np.zeros((1,1))
                 for i in range(self.num_layers, 0, -1):
-                   temp_err = self.layers["L" + str(i)].update_weights(forward_cache["Z" + str(i - 1)], temp_err, mini_batch_y)
+                   temp_err = self.layers["L" + str(i)].update_weights(forward_cache["Z" + str(i - 1)], temp_err, mini_batch_y, self.learning_rate)
             (self.cost).append(cost/train_x.shape[1])
     def predict(self, test_x):
         layer_output = test_x
